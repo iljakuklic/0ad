@@ -367,13 +367,15 @@ public:
 					CFixedVector2D from(it->second.x, it->second.z);
 					CFixedVector2D to(msgData.x, msgData.z);
 					m_Subdivision.Move(ent, from, to);
-					LosMove(it->second.owner, it->second.visionRange, from, to);
+					// bloking vision (TODO make optional)
+					LosBlockingMove(it->second.owner, it->second.visionRange, from, to);
 				}
 				else
 				{
 					CFixedVector2D to(msgData.x, msgData.z);
 					m_Subdivision.Add(ent, to);
-					LosAdd(it->second.owner, it->second.visionRange, to);
+					// bloking vision (TODO make optional)
+					LosBlockingAdd(it->second.owner, it->second.visionRange, to);
 				}
 
 				it->second.inWorld = 1;
@@ -386,7 +388,8 @@ public:
 				{
 					CFixedVector2D from(it->second.x, it->second.z);
 					m_Subdivision.Remove(ent, from);
-					LosRemove(it->second.owner, it->second.visionRange, from);
+					// bloking vision (TODO make optional)
+					LosBlockingRemove(it->second.owner, it->second.visionRange, from);
 				}
 
 				it->second.inWorld = 0;
@@ -410,8 +413,9 @@ public:
 			if (it->second.inWorld)
 			{
 				CFixedVector2D pos(it->second.x, it->second.z);
-				LosRemove(it->second.owner, it->second.visionRange, pos);
-				LosAdd(msgData.to, it->second.visionRange, pos);
+				// bloking vision (TODO make optional)
+				LosBlockingRemove(it->second.owner, it->second.visionRange, pos);
+				LosBlockingAdd(msgData.to, it->second.visionRange, pos);
 			}
 
 			ENSURE(-128 <= msgData.to && msgData.to <= 127);
@@ -526,7 +530,7 @@ public:
 		for (std::map<entity_id_t, EntityData>::const_iterator it = m_EntityData.begin(); it != m_EntityData.end(); ++it)
 		{
 			if (it->second.inWorld)
-				LosAdd(it->second.owner, it->second.visionRange, CFixedVector2D(it->second.x, it->second.z));
+				LosBlockingAdd(it->second.owner, it->second.visionRange, CFixedVector2D(it->second.x, it->second.z));
 		}
 
 		for (ssize_t j = 0; j < m_TerrainVerticesPerSide; ++j)
@@ -1364,6 +1368,7 @@ public:
 		}
 	}
 
+	
 	void LosAdd(player_id_t owner, entity_pos_t visionRange, CFixedVector2D pos)
 	{
 		if (visionRange.IsZero() || owner <= 0 || owner > MAX_LOS_PLAYER_ID)
@@ -1399,6 +1404,175 @@ public:
 			LosUpdateHelperIncremental((u8)owner, visionRange, from, to);
 		}
 	}
+	
+	
+	// blocking vision implementation
+	
+
+	/**
+	 * Add (adding=true) or remove (adding=false) vision within given range
+	 * takeing obstacles to vision into an account (currently terrain only).
+	 */
+	template<bool adding>
+	void LosBlockingUpdateHelper(u8 owner, entity_pos_t visionRange, CFixedVector2D pos)
+	{
+		if (m_TerrainVerticesPerSide == 0) // do nothing if not initialised yet
+			return;
+
+		PROFILE("LosBlockingUpdateHelper");
+
+		std::vector<u16>& counts = m_LosPlayerCounts.at(owner);
+
+		// Lazy initialisation of counts:
+		if (counts.empty())
+			counts.resize(m_TerrainVerticesPerSide*m_TerrainVerticesPerSide);
+
+		u16* countsData = &counts[0];
+		
+		// Translate world coordinates into fractional tile-space coordinates
+		int x = (pos.X / (int)TERRAIN_TILE_SIZE).ToInt_RoundToNearest();
+		int z = (pos.Y / (int)TERRAIN_TILE_SIZE).ToInt_RoundToNearest();
+		int r = (visionRange / (int)TERRAIN_TILE_SIZE).ToInt_RoundToNearest();
+		// get height map
+		const u16* heightmap = GetSimContext().GetTerrain().GetHeightMap();
+		// unit height, hardcoded to 3m for now (TODO make configurable on per-unit-type basis)
+		const ssize_t unit_height = HEIGHT_UNITS_PER_METRE * 3;
+		// altitiude of unit viewpoint (BUG: probably does not work with naval units)
+		const u16 alt = unit_height + heightmap[z * m_TerrainVerticesPerSide + x];
+		
+		/*
+		 * Initialize visibility mask in polar coordinates.
+		 * Number of rays is set up in a way that there is roughly one ray
+		 * per tile near the edge of the LOS circle (approximate pi as 3 for now).
+		 * Each component of this vector represents a vision ray casted from the unit,
+		 * namely i-th component is a ray with angle (i / (r * 2 * pi)) rad.
+		 * Bits in the component represent discrete points on the ray, one tile
+		 * worth of distance per bit.
+		 */
+		std::vector<u32> rayMasks(r * 3 * 2, 0);
+		
+		// angular step (angle between two consecutive rays)
+		fixed sinalpha, cosalpha;
+		sincos_approx(fixed::FromFloat(1.0f / r), sinalpha, cosalpha);
+		
+		// ray step (unit vector in given angle)
+		CFixedVector2D step(fixed::FromInt(1), fixed::FromInt(0));
+		
+		for (unsigned rayid = 0; rayid < rayMasks.size(); ++rayid)
+		{
+			// viewing angle represented by ratio x/y
+			float xy = -1e10;
+			// ray position
+			CFixedVector2D rpos = step;
+			
+			// for each distance sample on the ray
+			for (int d = 1; d <= r; ++d)
+			{
+				int tx = rpos.X.ToInt_RoundToNearest() + x;
+				int tz = rpos.Y.ToInt_RoundToNearest() + z;
+				
+				// bounds check
+				if (tx < 1 || m_TerrainVerticesPerSide - 2 < tx || tz < 1 || m_TerrainVerticesPerSide - 2 < tz)
+					break;
+				
+				// compute the new angle
+				float curxy = float(heightmap[tz * m_TerrainVerticesPerSide + tx] - alt) / d;
+				
+				// visibility check
+				if (curxy >= xy)
+				{
+					rayMasks[rayid] |= (1 << (d - 1));
+					xy = curxy;
+				}
+				
+				// next stop on the ray
+				rpos += step;
+			}
+			
+			// calculate the next angle (avoiding expensive sin/cos calls)
+			step = CFixedVector2D(
+				 cosalpha.Multiply(step.X) + sinalpha.Multiply(step.Y),
+				-sinalpha.Multiply(step.X) + cosalpha.Multiply(step.Y)
+			);
+		}
+		
+		int ymax = std::min(m_TerrainVerticesPerSide-2, z + r);
+		for (int zz = std::max(1, z - r); zz <= ymax; ++zz)
+		{
+			int dz = z - zz;
+			
+			int xmax = std::min(m_TerrainVerticesPerSide-2, x + r);
+			for (int xx = std::max(1, x - r); xx <= xmax; ++xx)
+			{
+				int dx = xx - x;
+				int dist = static_cast<int>(sqrt(dx*dx + dz*dz)) - 1;
+				int alpha = static_cast<int>(atan2(dz, dx) * r * 3 / 3.14159 + 0.5);
+				if (alpha < 0) alpha += rayMasks.size();
+				
+				if (((1 << (dist - 1)) & rayMasks[alpha]) || dist < 1)
+				{
+					if (adding)
+						LosAddStripHelper(owner, xx, xx, zz, countsData);
+					else
+						LosRemoveStripHelper(owner, xx, xx, zz, countsData);
+				}
+			}
+		}
+	}
+
+	void LosBlockingAdd(player_id_t owner, entity_pos_t visionRange, CFixedVector2D pos)
+	{
+		if (visionRange.IsZero() || owner <= 0 || owner > MAX_LOS_PLAYER_ID)
+			return;
+		
+		// resolution in length units per tile
+		int res = (int)TERRAIN_TILE_SIZE;
+		
+		// quantize vectors to tiles
+		pos.X = entity_pos_t::FromInt((pos.X/res).ToInt_RoundToNearest() * res);
+		pos.Y = entity_pos_t::FromInt((pos.Y/res).ToInt_RoundToNearest() * res);
+
+		LosBlockingUpdateHelper<true>((u8)owner, visionRange, pos);
+	}
+
+	void LosBlockingRemove(player_id_t owner, entity_pos_t visionRange, CFixedVector2D pos)
+	{
+		if (visionRange.IsZero() || owner <= 0 || owner > MAX_LOS_PLAYER_ID)
+			return;
+		
+		// resolution in length units per tile
+		int res = (int)TERRAIN_TILE_SIZE;
+		
+		// quantize vectors to tiles
+		pos.X = entity_pos_t::FromInt((pos.X/res).ToInt_RoundToNearest() * res);
+		pos.Y = entity_pos_t::FromInt((pos.Y/res).ToInt_RoundToNearest() * res);
+
+		LosBlockingUpdateHelper<false>((u8)owner, visionRange, pos);
+	}
+
+	void LosBlockingMove(player_id_t owner, entity_pos_t visionRange, CFixedVector2D from, CFixedVector2D to)
+	{
+		if (visionRange.IsZero() || owner <= 0 || owner > MAX_LOS_PLAYER_ID)
+			return;
+		
+		// resolution in length units per tile
+		int res = (int)TERRAIN_TILE_SIZE;
+		
+		// quantize vectors to tiles
+		from.X = entity_pos_t::FromInt((from.X/res).ToInt_RoundToNearest() * res);
+		from.Y = entity_pos_t::FromInt((from.Y/res).ToInt_RoundToNearest() * res);
+		to.X   = entity_pos_t::FromInt((  to.X/res).ToInt_RoundToNearest() * res);
+		to.Y   = entity_pos_t::FromInt((  to.Y/res).ToInt_RoundToNearest() * res);
+		
+		// quantized position did not move -> nothing to do
+		if (from == to) return;
+
+		LosBlockingUpdateHelper<false>((u8)owner, visionRange, from);
+		LosBlockingUpdateHelper<true>((u8)owner, visionRange, to);
+	}
+	
+	
+	// statistics
 
 	virtual i32 GetPercentMapExplored(player_id_t player)
 	{
