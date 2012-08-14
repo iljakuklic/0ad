@@ -1420,6 +1420,7 @@ public:
 			return;
 
 		PROFILE("LosBlockingUpdateHelper");
+		TIMER(L"LosBlockingUpdateHelper");
 
 		std::vector<u16>& counts = m_LosPlayerCounts.at(owner);
 
@@ -1437,8 +1438,8 @@ public:
 		const u16* heightmap = GetSimContext().GetTerrain().GetHeightMap();
 		// unit height, hardcoded to 3m for now (TODO make configurable on per-unit-type basis)
 		const ssize_t unit_height = HEIGHT_UNITS_PER_METRE * 3;
-		// altitiude of unit viewpoint (BUG: probably does not work with naval units)
-		const u16 alt = unit_height + heightmap[z * m_TerrainVerticesPerSide + x];
+		// altitiude of unit viewpoint (BUG: does not work with naval units)
+		const float alt = unit_height + heightmap[z * m_TerrainVerticesPerSide + x];
 		
 		/*
 		 * Initialize visibility mask in polar coordinates.
@@ -1476,7 +1477,8 @@ public:
 					break;
 				
 				// compute the new angle
-				float curxy = float(heightmap[tz * m_TerrainVerticesPerSide + tx] - alt) / d;
+				// BUG: sample water height instead of terrain height on water
+				float curxy = (heightmap[tz * m_TerrainVerticesPerSide + tx] - alt) / d;
 				
 				// visibility check
 				if (curxy >= xy)
