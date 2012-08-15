@@ -1465,11 +1465,14 @@ public:
  		void operator++()
 		{
 			m_cur = m_cur + m_step;
-			m_dist = m_dist + fixed::FromInt(1);
+			m_dist = m_dist + m_step.Length();
 		}
 		
 		/// Get current point
 		CFixedVector2D operator*() const { return m_cur; }
+		
+		/// Get current ray distance from the origin
+		fixed distance() const { return m_dist; }
 		
 		/// Get current point as tile coordiantes (rounded)
 		std::pair<i16, i16> coords() const
@@ -1541,85 +1544,56 @@ public:
 		// altitiude of unit viewpoint (BUG: does not work with naval units)
 		const float alt = unit_height + heightmap[z * m_TerrainVerticesPerSide + x];
 		
-		/*
-		 * Initialize visibility mask in polar coordinates.
-		 * Number of rays is set up in a way that there is roughly one ray
-		 * per tile near the edge of the LOS circle (approximate pi as 3 for now).
-		 * Each component of this vector represents a vision ray casted from the unit,
-		 * namely i-th component is a ray with angle (i / (r * 2 * pi)) rad.
-		 * Bits in the component represent discrete points on the ray, one tile
-		 * worth of distance per bit.
-		 */
-		std::vector<u32> rayMasks(r * 3 * 2, 0);
+		int rayCount = r * 13 / 2;
+		DirectionIterator dir(rayCount);
+		fixed step_cos_sq = dir.step_cosine().Multiply(dir.step_cosine());
 		
-		// angular step (angle between two consecutive rays)
-		fixed sinalpha, cosalpha;
-		sincos_approx(fixed::FromFloat(1.0f / r), sinalpha, cosalpha);
-		
-		// ray step (unit vector in given angle)
-		CFixedVector2D step(fixed::FromInt(1), fixed::FromInt(0));
-		
-		for (unsigned rayid = 0; rayid < rayMasks.size(); ++rayid)
+		// for each ray
+		for (; dir.step() < rayCount; ++dir)
 		{
-			// viewing angle represented by ratio x/y
-			float xy = -1e10;
-			// ray position
-			CFixedVector2D rpos = step;
+			// height difference vs distance ratio
+			float min_xy = -1e10;
 			
-			// for each distance sample on the ray
-			for (int d = 1; d <= r; ++d)
+			// for each stop on the ray
+			for (RayPointIterator pos(*dir); pos.distance() <= fixed::FromInt(r); ++pos)
 			{
-				int tx = rpos.X.ToInt_RoundToNearest() + x;
-				int tz = rpos.Y.ToInt_RoundToNearest() + z;
+				std::pair<i16, i16> coords = pos.coords();
 				
-				// bounds check
-				if (tx < 1 || m_TerrainVerticesPerSide - 2 < tx || tz < 1 || m_TerrainVerticesPerSide - 2 < tz)
+				// absolute ray position
+				int xx = coords.first + x, zz = coords.second + z;
+				
+				// map bounds check
+				if (xx < 1 || m_TerrainVerticesPerSide - 2 < xx ||
+					zz < 1 || m_TerrainVerticesPerSide - 2 < zz)
 					break;
+				
 				
 				// compute the new angle
 				// BUG: sample water height instead of terrain height on water
-				float curxy = (heightmap[tz * m_TerrainVerticesPerSide + tx] - alt) / d;
+				float cur_xy = (heightmap[zz * m_TerrainVerticesPerSide + xx] - alt) / pos.distance().ToFloat();
 				
 				// visibility check
-				if (curxy >= xy)
+				if (cur_xy >= min_xy)
 				{
-					rayMasks[rayid] |= (1 << (d - 1));
-					xy = curxy;
+					// if this ray affects the tile, make it (not-)visible
+					if (true || pos.is_nearest_sample(step_cos_sq))
+					{
+						if (adding)
+							LosAddStripHelper(owner, xx, xx, zz, countsData);
+						else
+							LosRemoveStripHelper(owner, xx, xx, zz, countsData);
+					}
+					// update min viewing angle
+					min_xy = cur_xy;
 				}
-				
-				// next stop on the ray
-				rpos += step;
 			}
-			
-			// calculate the next angle (avoiding expensive sin/cos calls)
-			step = CFixedVector2D(
-				 cosalpha.Multiply(step.X) + sinalpha.Multiply(step.Y),
-				-sinalpha.Multiply(step.X) + cosalpha.Multiply(step.Y)
-			);
 		}
 		
-		int ymax = std::min(m_TerrainVerticesPerSide-2, z + r);
-		for (int zz = std::max(1, z - r); zz <= ymax; ++zz)
-		{
-			int dz = z - zz;
-			
-			int xmax = std::min(m_TerrainVerticesPerSide-2, x + r);
-			for (int xx = std::max(1, x - r); xx <= xmax; ++xx)
-			{
-				int dx = xx - x;
-				int dist = static_cast<int>(sqrt(dx*dx + dz*dz)) - 1;
-				int alpha = static_cast<int>(atan2(dz, dx) * r * 3 / 3.14159 + 0.5);
-				if (alpha < 0) alpha += rayMasks.size();
-				
-				if (((1 << (dist - 1)) & rayMasks[alpha]) || dist < 1)
-				{
-					if (adding)
-						LosAddStripHelper(owner, xx, xx, zz, countsData);
-					else
-						LosRemoveStripHelper(owner, xx, xx, zz, countsData);
-				}
-			}
-		}
+		// make the tile with the unit itself (not-)visible
+		if (adding)
+			LosAddStripHelper(owner, x, x, z, countsData);
+		else
+			LosRemoveStripHelper(owner, x, x, z, countsData);
 	}
 
 	void LosBlockingAdd(player_id_t owner, entity_pos_t visionRange, CFixedVector2D pos)
