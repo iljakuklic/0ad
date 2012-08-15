@@ -1408,6 +1408,106 @@ public:
 	
 	// blocking vision implementation
 	
+	/**
+	 * Angular iterator represented by an unit vector.
+	 *
+	 * Iterates a direction of a unit vector, starting with (1, 0).
+	 * In n-th step it returns the vector: (cos(n*alpha), sin(n*alpha))
+	 * while avoiding sin/cos calls.
+	 */
+	class DirectionIterator
+	{
+	public:
+		
+		/// Create a new angle iterator that divides angle max (default = 2*pi rad) into n angular steps
+		DirectionIterator(int n, fixed max = fixed::FromFloat(atan(1) * 8))
+			: m_step(0), m_cur(fixed::FromInt(1), fixed::FromInt(0))
+		{
+			sincos_approx(max / n, m_sin, m_cos);
+		}
+		
+		/// next direction step
+		void operator++()
+		{
+			m_cur = CFixedVector2D(
+				m_cos.Multiply(m_cur.X) - m_sin.Multiply(m_cur.Y),
+				m_sin.Multiply(m_cur.X) + m_cos.Multiply(m_cur.Y)
+			);
+			m_step++;
+		}
+		
+		/// get the direction vector
+		CFixedVector2D operator*() const { return m_cur; }
+		/// get current step number
+		int step() const { return m_step; }
+		/// get cosine of the step angle
+		fixed step_cosine() const { return m_cos; }
+
+	private:
+		int m_step;           // current step number
+		fixed m_sin, m_cos;   // approximate angle sine / cosine
+		CFixedVector2D m_cur; // current direction vector
+	};
+	
+	/**
+	 * Ray point iterator.
+	 * 
+	 * Iterates sample positions along the ray.
+	 */
+	class RayPointIterator
+	{
+	public:
+		/// Constructor
+		RayPointIterator(CFixedVector2D step)
+			: m_cur(step), m_step(step), m_dist(step.Length()) {}
+		
+		/// Advance to the next point
+ 		void operator++()
+		{
+			m_cur = m_cur + m_step;
+			m_dist = m_dist + fixed::FromInt(1);
+		}
+		
+		/// Get current point
+		CFixedVector2D operator*() const { return m_cur; }
+		
+		/// Get current point as tile coordiantes (rounded)
+		std::pair<i16, i16> coords() const
+		{
+			return std::make_pair(m_cur.X.ToInt_RoundToNearest(), m_cur.Y.ToInt_RoundToNearest());
+		}
+		
+		/**
+		 * Return true if the current sample is the nearest sample we can get.
+		 * 
+		 * Given angle alpha between two cosecutive rays, the cos_alpha_sq
+		 * shall be set to (cos(alpha))^2.
+		 */
+		bool is_nearest_sample(fixed cos_alpha_sq) const
+		{
+			std::pair<i16, i16> coords1 = coords();
+			CFixedVector2D actualdir(fixed::FromInt(coords1.first), fixed::FromInt(coords1.second));
+			
+			// calculate angular error
+			fixed projected     = actualdir.Dot(m_step);
+			fixed projected_sq  = projected.Multiply(projected);  // (cos(err))^2
+			fixed actual_len_sq = actualdir.Dot(actualdir);       // |actual|^2
+			if (actual_len_sq.Multiply(cos_alpha_sq) > projected_sq.Multiply(fixed::FromInt(4)))
+				return false;
+			
+			// calculate linear error
+			if ((projected - m_dist).Absolute() > m_dist / fixed::FromFloat(2))
+				return false;
+				
+			return true;
+		}
+		
+	private:
+		CFixedVector2D m_cur;          // current ray position
+		const CFixedVector2D m_step;   // ray step and direction
+		fixed m_dist;                  // current ray position distance from the origin
+	};
+	
 
 	/**
 	 * Add (adding=true) or remove (adding=false) vision within given range
