@@ -1483,25 +1483,25 @@ public:
 		/**
 		 * Return true if the current sample is the nearest sample we can get.
 		 * 
-		 * Given angle alpha between two cosecutive rays, the cos_alpha_sq
-		 * shall be set to (cos(alpha))^2.
+		 * Given angle alpha between two cosecutive rays, the cos_alpha_2_
+		 * shall be set to ((cos(alpha) + 1) / 2).
 		 */
-		bool is_nearest_sample(fixed cos_alpha_sq) const
+		bool is_nearest_sample(fixed cos_alpha_1_2) const
 		{
 			std::pair<i16, i16> coords1 = coords();
-			CFixedVector2D actualdir(fixed::FromInt(coords1.first), fixed::FromInt(coords1.second));
+			CFixedVector2D actualvec(fixed::FromInt(coords1.first), fixed::FromInt(coords1.second));
 			
 			// calculate angular error
-			fixed projected     = actualdir.Dot(m_step);
+			fixed projected     = actualvec.Dot(m_step);
 			fixed projected_sq  = projected.Multiply(projected);  // (cos(err))^2
-			fixed actual_len_sq = actualdir.Dot(actualdir);       // |actual|^2
-			if (actual_len_sq.Multiply(cos_alpha_sq) > projected_sq.Multiply(fixed::FromInt(4)))
+			fixed actual_len_sq = actualvec.Dot(actualvec);       // |actual|^2
+			if (projected_sq < actual_len_sq.Multiply(cos_alpha_1_2))
 				return false;
 			
 			// calculate linear error
-			if ((projected - m_dist).Absolute() > m_dist / fixed::FromFloat(2))
+			if ((projected - m_dist).Absolute() > fixed::FromFloat(0.5))
 				return false;
-				
+			
 			return true;
 		}
 		
@@ -1536,7 +1536,7 @@ public:
 		// Translate world coordinates into fractional tile-space coordinates
 		int x = (pos.X / (int)TERRAIN_TILE_SIZE).ToInt_RoundToNearest();
 		int z = (pos.Y / (int)TERRAIN_TILE_SIZE).ToInt_RoundToNearest();
-		int r = (visionRange / (int)TERRAIN_TILE_SIZE).ToInt_RoundToNearest();
+		fixed r = visionRange / (int)TERRAIN_TILE_SIZE;
 		// get height map
 		const u16* heightmap = GetSimContext().GetTerrain().GetHeightMap();
 		// unit height, hardcoded to 3m for now (TODO make configurable on per-unit-type basis)
@@ -1544,9 +1544,10 @@ public:
 		// altitiude of unit viewpoint (BUG: does not work with naval units)
 		const float alt = unit_height + heightmap[z * m_TerrainVerticesPerSide + x];
 		
-		int rayCount = r * 13 / 2;
+		int rayCount = r.ToInt_RoundToNearest() * 63 / 10;  // 2*pi ==approx 63/10
 		DirectionIterator dir(rayCount);
-		fixed step_cos_sq = dir.step_cosine().Multiply(dir.step_cosine());
+		// BEWARE: ugly hack below!! 0.9994 shall be 1, but precision issues will come up if changed to be so
+		fixed cos_alpha_1_2 = (dir.step_cosine() + fixed::FromInt(1)).Multiply(fixed::FromFloat(0.9994 / 2));
 		
 		// for each ray
 		for (; dir.step() < rayCount; ++dir)
@@ -1555,7 +1556,7 @@ public:
 			float min_xy = -1e10;
 			
 			// for each stop on the ray
-			for (RayPointIterator pos(*dir); pos.distance() <= fixed::FromInt(r); ++pos)
+			for (RayPointIterator pos(*dir); pos.distance() <= r; ++pos)
 			{
 				std::pair<i16, i16> coords = pos.coords();
 				
@@ -1576,13 +1577,15 @@ public:
 				if (cur_xy >= min_xy)
 				{
 					// if this ray affects the tile, make it (not-)visible
-					if (true || pos.is_nearest_sample(step_cos_sq))
+					if (pos.is_nearest_sample(cos_alpha_1_2))
 					{
 						if (adding)
 							LosAddStripHelper(owner, xx, xx, zz, countsData);
 						else
 							LosRemoveStripHelper(owner, xx, xx, zz, countsData);
+						
 					}
+					
 					// update min viewing angle
 					min_xy = cur_xy;
 				}
