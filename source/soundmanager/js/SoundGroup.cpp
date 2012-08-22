@@ -221,10 +221,10 @@ void CSoundGroup::Reload()
 	for (size_t i = 0; i < filenames.size(); i++)
 	{
 		VfsPath  thePath =  m_filepath/filenames[i];
-		ISoundItem* temp = g_SoundManager->LoadItem(&thePath);
+		ISoundItem* temp = g_SoundManager->LoadItem(thePath);
 
 		if (temp == NULL)
-			HandleError(L"error loading sound", thePath, NULL);
+			HandleError(L"error loading sound", thePath, ERR::FAIL);
 		else
 			snd_group.push_back(temp);
 	}
@@ -253,7 +253,7 @@ bool CSoundGroup::LoadSoundGroup(const VfsPath& pathnameXML)
 	CXeromyces XeroFile;
 	if (XeroFile.Load(g_VFS, pathnameXML) != PSRETURN_OK)
 	{
-		HandleError(L"error loading file", pathnameXML, NULL);
+		HandleError(L"error loading file", pathnameXML, ERR::FAIL);
 		return false;
 	}
 	// Define elements used in XML file

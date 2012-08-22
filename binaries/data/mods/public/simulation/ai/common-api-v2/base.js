@@ -13,6 +13,8 @@ function BaseAI(settings)
 	this._entityCollections = [];
 	this._entityCollectionsByDynProp = {};
 	this._entityCollectionsUID = 0;
+
+	this.turn = 0;
 }
 
 //Return a simple object (using no classes etc) that will be serialized
@@ -61,6 +63,17 @@ var g_FoundationForbiddenComponents = {
 	"GarrisonHolder": 1,
 };
 
+// Components that will be disabled in resource entity templates.
+// Roughly the inverse of CCmpTemplateManager::CopyResourceSubset.
+var g_ResourceForbiddenComponents = {
+	"Cost": 1,
+	"Decay": 1,
+	"Health": 1,
+	"UnitAI": 1,
+	"UnitMotion": 1,
+	"Vision": 1
+};
+
 BaseAI.prototype.GetTemplate = function(name)
 {
 	if (this._templates[name])
@@ -70,7 +83,7 @@ BaseAI.prototype.GetTemplate = function(name)
 		return this._derivedTemplates[name];
 
 	// If this is a foundation template, construct it automatically
-	if (name.substr(0, 11) === "foundation|")
+	if (name.indexOf("foundation|") !== -1)
 	{
 		var base = this.GetTemplate(name.substr(11));
 
@@ -81,6 +94,18 @@ BaseAI.prototype.GetTemplate = function(name)
 
 		this._derivedTemplates[name] = foundation;
 		return foundation;
+	}
+	else if (name.indexOf("resource|") !== -1)
+	{
+		var base = this.GetTemplate(name.substr(9));
+
+		var resource = {};
+		for (var key in base)
+			if (!g_ResourceForbiddenComponents[key])
+				resource[key] = base[key];
+
+		this._derivedTemplates[name] = resource;
+		return resource;
 	}
 
 	error("Tried to retrieve invalid template '"+name+"'");
@@ -198,16 +223,23 @@ BaseAI.prototype.ApplyEntitiesDelta = function(state)
 
 		for (var prop in changes)
 		{
-			this._entities[id]._entity[prop] = changes[prop];
-			this.updateEntityCollections(prop, this._entities[id]);
+			if (prop == "position" || prop == "resourceSupplyAmount") {
+				if (this.turn % 10 === 0) {
+					this._entities[id]._entity[prop] = changes[prop];
+					this.updateEntityCollections(prop, this._entities[id]);
+				}
+			} else {
+				this._entities[id]._entity[prop] = changes[prop];
+				this.updateEntityCollections(prop, this._entities[id]);
+			}
 		}
 	}
-
 	Engine.ProfileStop();
 };
 
 BaseAI.prototype.OnUpdate = function()
 {	// AIs override this function
+	// They should do at least this.turn++;
 };
 
 BaseAI.prototype.chat = function(message)
@@ -253,7 +285,7 @@ BaseAI.prototype.removeUpdatingEntityCollection = function(entCollection)
 
 BaseAI.prototype.updateEntityCollections = function(property, ent)
 {
-	if (this._entityCollectionsByDynProp[property])
+	if (this._entityCollectionsByDynProp[property] !== undefined)
 	{
 		for each (var entCollection in this._entityCollectionsByDynProp[property])
 		{
