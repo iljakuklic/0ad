@@ -18,9 +18,15 @@
 #ifndef INCLUDED_OGGDATA_H
 #define INCLUDED_OGGDATA_H
 
+#include "lib/config2.h"
+
+#if CONFIG2_AUDIO
+
+#include "ogg.h"
 #include "SoundData.h"
+
 #include "lib/external_libraries/openal.h"
-#include "vorbis/vorbisfile.h"
+#include "lib/file/vfs/vfs_path.h"
 
 class COggData : public CSoundData
 {
@@ -31,7 +37,7 @@ public:
 	COggData();
 	virtual ~COggData();
 
-	virtual bool InitOggFile(const wchar_t* fileLoc);
+	virtual bool InitOggFile(const VfsPath& itemPath);
 	virtual bool IsFileFinished();
 	virtual bool IsOneShot();
 
@@ -39,8 +45,8 @@ public:
 	virtual void ResetFile();
 
 protected:
-	OggVorbis_File  m_vf;
-	int m_current_section;
+	OggStreamPtr  ogg;
+//	int m_current_section;
 	bool m_FileFinished;
 	bool m_OneShot;
 	ALuint m_Buffer[100];
@@ -53,5 +59,5 @@ protected:
 	ALuint* GetBufferPtr();
 };
 
-
+#endif // CONFIG2_AUDIO
 #endif // INCLUDED_OGGDATA_H

@@ -32,7 +32,11 @@
   </group>
   <group>
     <variant>
-      <textures><texture file="structural/celt_struct_1.dds" name="baseTex"/></textures>
+      <textures>
+	    <texture file="structural/celt_struct_1.dds" name="baseTex"/>
+	    <texture file="structural/celt_struct_1_norm.png" name="normTex"/>
+	    <texture file="structural/celt_struct_1_spec.png" name="specTex"/>
+	  </textures>
     </variant>
   </group>
   <group>
@@ -45,10 +49,11 @@
     <variant name="death">
       <props>
         <prop attachpoint="garrisoned"/>
-        <prop actor="particle/destruction_smoke_small.xml" attachpoint="dust"/>
-        <prop actor="particle/destruction_dust_small.xml" attachpoint="dust"/>
-        <prop actor="particle/destruction_dust_small_gray.xml" attachpoint="dust"/>
+        <prop actor="particle/destruction_smoke_small.xml" attachpoint="root"/>
+        <prop actor="particle/destruction_dust_small.xml" attachpoint="root"/>
+        <prop actor="particle/destruction_dust_small_gray.xml" attachpoint="root"/>
       </props>
     </variant>
   </group>
+  <material>player_trans_parallax_spec.xml</material>
 </actor>

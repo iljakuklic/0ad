@@ -66,6 +66,11 @@
 	    <action on="Press">renderer.silhouettes = !renderer.silhouettes;</action>
 	</object>
 
+	<!-- Sky -->
+	<object hotkey="showsky">
+	    <action on="Press">renderer.showsky = !renderer.showsky;</action>
+	</object>
+
 	<!-- Pause -->
 	<object hotkey="pause">
 	    <action on="Press">togglePause();</action>
@@ -324,31 +329,31 @@
 	    >
 		<!-- Food -->
 		<object size="0 0 90 100%" type="image" style="resourceCounter" tooltip="Food" tooltip_style="sessionToolTipBold">
-		    <object size="0 -4 40 36" type="image" sprite="stretched:session/icons/resources/food.png"/>
+		    <object size="0 -4 40 36" type="image" sprite="stretched:session/icons/resources/food.png" ghost="true"/>
 		    <object size="32 0 100% 100%-2" type="text" style="resourceText" name="resourceFood"/>
 		</object>
 
 		<!-- Wood -->
 		<object size="90 0 180 100%" type="image" style="resourceCounter" tooltip="Wood" tooltip_style="sessionToolTipBold">
-		    <object size="0 -4 40 36" type="image" sprite="stretched:session/icons/resources/wood.png"/>
+		    <object size="0 -4 40 36" type="image" sprite="stretched:session/icons/resources/wood.png" ghost="true"/>
 		    <object size="32 0 100% 100%-2" type="text" style="resourceText" name="resourceWood"/>
 		</object>
 
 		<!-- Stone -->
 		<object size="180 0 270 100%" type="image" style="resourceCounter" tooltip="Stone" tooltip_style="sessionToolTipBold">
-		    <object size="0 -4 40 36" type="image" sprite="stretched:session/icons/resources/stone.png"/>
+		    <object size="0 -4 40 36" type="image" sprite="stretched:session/icons/resources/stone.png" ghost="true"/>
 		    <object size="32 0 100% 100%-2" type="text" style="resourceText" name="resourceStone"/>
 		</object>
 
 		<!-- Metal -->
 		<object size="270 0 360 100%"  type="image" style="resourceCounter" tooltip="Metal" tooltip_style="sessionToolTipBold">
-		    <object size="0 -4 40 36" type="image" sprite="stretched:session/icons/resources/metal.png"/>
+		    <object size="0 -4 40 36" type="image" sprite="stretched:session/icons/resources/metal.png" ghost="true"/>
 		    <object size="32 0 100% 100%-2" type="text" style="resourceText" name="resourceMetal"/>
 		</object>
 
 		<!-- Population -->
 		<object size="360 0 450 100%" type="image" style="resourceCounter" tooltip="Population (current / limit)" tooltip_style="sessionToolTipBold">
-		    <object size="0 -4 40 34" type="image" sprite="stretched:session/icons/resources/population.png"/>
+		    <object size="0 -4 40 34" type="image" sprite="stretched:session/icons/resources/population.png" ghost="true"/>
 		    <object size="32 0 100% 100%-2" type="text" style="resourceText" name="resourcePop"/>
 		</object>
 	    </object>
@@ -370,7 +375,7 @@
 
 	    <!-- Displays Alpha name and number -->
 	    <object size="70%-128 0 70%+128 100%" name="alphaLabel" type="text" style="CenteredLabelText" text_valign="top" ghost="true">
-		ALPHA X : Jhelum<!-- IMPORTANT: remember to update pregame/mainmenu.xml in sync with this -->
+		ALPHA XI : Kronos<!-- IMPORTANT: remember to update pregame/mainmenu.xml in sync with this -->
 
 		<!-- Displays build date and revision number-->
 		<object size="50%-128 0 50%+128 100%-2" name="buildTimeLabel" type="text" style="BuildNameText" ghost="true">
@@ -585,7 +590,7 @@
 			size="24 12 100% 100%"
 		>
 		    <object size="0 0 100% 100%">
-			<repeat count="16">
+			<repeat count="12">
 			    <object name="unitGarrisonButton[n]" hidden="true" style="iconButton" type="button" size="0 0 36 36" tooltip_style="sessionToolTipBottomBold" z="100">
 				<object name="unitGarrisonIcon[n]" type="image" ghost="true" size="3 3 33 33"/>
 				<object name="unitGarrisonCount[n]" ghost="true" style="groupIconsText" type="text" size="0 0 100% 100%"/>

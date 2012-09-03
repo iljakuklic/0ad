@@ -19,10 +19,12 @@
 
 #include "CSoundItem.h"
 
+#if CONFIG2_AUDIO
+
 #include "soundmanager/data/SoundData.h"
+#include "soundmanager/SoundManager.h"
 
 #include <iostream>
-
 
 CSoundItem::CSoundItem()
 {
@@ -38,10 +40,11 @@ CSoundItem::CSoundItem(CSoundData* sndData)
 
 CSoundItem::~CSoundItem()
 {
-	ALuint al_buf;
+	AL_CHECK
 	
 	Stop();
-	alSourceUnqueueBuffers(m_ALSource, 1, &al_buf);
+	alSourcei(m_ALSource, AL_BUFFER, 0);
+	AL_CHECK
 }
 
 bool CSoundItem::IdleTask()
@@ -52,6 +55,7 @@ bool CSoundItem::IdleTask()
 	{
 		int proc_state;
 		alGetSourceiv(m_ALSource, AL_SOURCE_STATE, &proc_state);
+		AL_CHECK
 		return (proc_state != AL_STOPPED);
 	}
 	return true;
@@ -63,5 +67,10 @@ void CSoundItem::Attach(CSoundData* itemData)
 	{
 		m_SoundData = itemData->IncrementCount();
 		alSourcei(m_ALSource, AL_BUFFER, m_SoundData->GetBuffer());
+		
+		AL_CHECK
 	}
 }
+
+#endif // CONFIG2_AUDIO
+

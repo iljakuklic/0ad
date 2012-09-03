@@ -3,13 +3,14 @@
   <Cost>
     <BuildTime>550</BuildTime>
     <Resources>
-      <wood>200</wood>
+      <wood>0</wood>
       <stone>500</stone>
+      <metal>500</metal>
     </Resources>
   </Cost>
   <Footprint replace="">
-    <Circle radius="26.0"/>
-    <Height>8.0</Height>
+    <Circle radius="24.0"/>
+    <Height>10.0</Height>
   </Footprint>
   <Health>
     <Max>5500</Max>
@@ -23,7 +24,7 @@
     <Icon>structures/theatron.png</Icon>
   </Identity>
   <Obstruction>
-    <Static width="52.0" depth="52.0"/>
+    <Static width="46.0" depth="46.0"/>
   </Obstruction>
   <Sound>
     <SoundGroups>
@@ -32,6 +33,9 @@
       <death>attack/destruction/building_collapse_large.xml</death>
     </SoundGroups>
   </Sound>
+  <TerritoryInfluence>
+    <Radius>100</Radius>
+  </TerritoryInfluence>
   <VisualActor>
     <Actor>structures/hellenes/theatre_new.xml</Actor>
     <FoundationActor>structures/fndn_theatron.xml</FoundationActor>
