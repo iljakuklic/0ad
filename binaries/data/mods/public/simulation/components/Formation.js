@@ -55,6 +55,16 @@ Formation.prototype.SetInPosition = function(ent)
 };
 
 /**
+ * Called by formation members upon entering non-walking states.
+ */
+Formation.prototype.UnsetInPosition = function(ent)
+{
+	var ind = this.inPosition.indexOf(ent);
+	if (ind != -1)
+		this.inPosition.splice(ind, 1);
+}
+
+/**
  * Set whether we should rearrange formation members if
  * units are removed from the formation.
  */
@@ -114,6 +124,25 @@ Formation.prototype.RemoveMembers = function(ents)
 	// Rearrange the remaining members
 	this.MoveMembersIntoFormation(true);
 };
+
+/**
+ * Called when the formation stops moving in order to detect
+ * units that have already reached their final positions.
+ */
+Formation.prototype.FindInPosition = function()
+{
+	for (var i = 0; i < this.members.length; ++i)
+	{
+		var cmpUnitMotion = Engine.QueryInterface(this.members[i], IID_UnitMotion);
+		if (!cmpUnitMotion.IsMoving())
+		{
+			// Verify that members are stopped in FORMATIONMEMBER.WALKING
+			var cmpUnitAI = Engine.QueryInterface(this.members[i], IID_UnitAI);
+			if (cmpUnitAI.IsWalking())
+				this.SetInPosition(this.members[i]);
+		}
+	}
+}
 
 /**
  * Remove all members and destroy the formation.
