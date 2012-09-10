@@ -392,11 +392,11 @@ playerIDs = primeSortPlayers(sortPlayers(playerIDs));
 					var h;
 					if (x < (cu + 0.5 + fadeDist - WATER_WIDTH/2))
 					{
-						h = 4 - 7.0 * (1 - ((cu + 0.5 + fadeDist - WATER_WIDTH/2) - x)/fadeDist);
+						h = 3 - 6 * (1 - ((cu + 0.5 + fadeDist - WATER_WIDTH/2) - x)/fadeDist);
 					}
 					else if (x > (cu2 + 0.5 - fadeDist + WATER_WIDTH/2))
 					{
-						h = 4 - 7.0 * (1 - (x - (cu2 + 0.5 - fadeDist + WATER_WIDTH/2))/fadeDist);
+						h = 3 - 6 * (1 - (x - (cu2 + 0.5 - fadeDist + WATER_WIDTH/2))/fadeDist);
 					}
 					else
 					{
@@ -433,11 +433,11 @@ playerIDs = primeSortPlayers(sortPlayers(playerIDs));
 					var h;
 					if (z < (cu + 0.5 + fadeDist - WATER_WIDTH/2))
 					{
-						h = 4 - 7.0 * (1 - ((cu + 0.5 + fadeDist - WATER_WIDTH/2) - z)/fadeDist);
+						h = 3 - 6 * (1 - ((cu + 0.5 + fadeDist - WATER_WIDTH/2) - z)/fadeDist);
 					}
 					else if (z > (cu2 + 0.5 - fadeDist + WATER_WIDTH/2))
 					{
-						h = 4 - 7.0 * (1 - (z - (cu2 + 0.5 - fadeDist + WATER_WIDTH/2))/fadeDist);
+						h = 3 - 6 * (1 - (z - (cu2 + 0.5 - fadeDist + WATER_WIDTH/2))/fadeDist);
 					}
 					else
 					{
@@ -467,6 +467,27 @@ playerIDs = primeSortPlayers(sortPlayers(playerIDs));
 		}
 	}
 	
+	if (!randInt(3))
+	{
+		if (mdd1 == 1) //vertical
+		{
+			var placer = new PathPlacer(1, fractionToTiles(0.5), fractionToTiles(0.99), fractionToTiles(0.5), scaleByMapSize(randInt(16,24),randInt(100,140)), 0.5, 3*(scaleByMapSize(1,4)), 0.1, 0.01);
+		}
+		else
+		{
+			var placer = new PathPlacer(fractionToTiles(0.5), 1, fractionToTiles(0.5), fractionToTiles(0.99), scaleByMapSize(randInt(16,24),randInt(100,140)), 0.5, 3*(scaleByMapSize(1,4)), 0.1, 0.01);
+		}
+		var terrainPainter = new LayeredPainter(
+			[tGrass, tGrass, tGrass],		// terrains
+			[1, 3]								// widths
+		);
+		var elevationPainter = new SmoothElevationPainter(
+			ELEVATION_SET,			// type
+			3.1,				// elevation
+			4				// blend radius
+		);
+		createArea(placer, [terrainPainter, elevationPainter, unPaintClass(clWater)], null);
+	}
 	var mdd2 = randInt(1,3);
 	if (mdd2 == 1)
 	{
@@ -1038,6 +1059,42 @@ else if (md == 6) //edge seas
 				);
 			}
 		}
+	}
+	
+	var mdd3 = randInt(1,3);
+	if (mdd3 == 1)
+	{
+		// create islands
+		log("Creating islands...");
+		placer = new ClumpPlacer(randInt(scaleByMapSize(8,15),scaleByMapSize(15,23))*randInt(scaleByMapSize(8,15),scaleByMapSize(15,23)), 0.80, 0.1, randFloat(0.0, 0.2));
+		terrainPainter = new LayeredPainter(
+			[tGrass, tGrass],		// terrains
+			[2]								// widths
+		);
+		elevationPainter = new SmoothElevationPainter(ELEVATION_SET, 3.1, 4);
+		createAreas(
+			placer,
+			[terrainPainter, elevationPainter, paintClass(clLand)], 
+			avoidClasses(clLand, 3, clPlayer, 3),
+			scaleByMapSize(2, 5)*randInt(8,14)
+		);
+	}
+	else if (mdd3 == 2)
+	{
+		// create extentions
+		log("Creating extentions...");
+		placer = new ClumpPlacer(randInt(scaleByMapSize(13,24),scaleByMapSize(24,45))*randInt(scaleByMapSize(13,24),scaleByMapSize(24,45)), 0.80, 0.1, 10);
+		terrainPainter = new LayeredPainter(
+			[tGrass, tGrass],		// terrains
+			[2]								// widths
+		);
+		elevationPainter = new SmoothElevationPainter(ELEVATION_SET, 3.1, 4);
+		createAreas(
+			placer,
+			[terrainPainter, elevationPainter, paintClass(clLand)], 
+			null,
+			scaleByMapSize(2, 5)*randInt(8,14)
+		);
 	}
 }
 //********************************************************************************************************
@@ -1651,10 +1708,10 @@ createAreas(
 	placer,
 	[terrainPainter, elevationPainter, paintClass(clHill)], 
 	[avoidClasses(clPlayer, 15, clHill, randInt(6, 18)), stayClasses(clLand, 0)],
-	randInt(0, scaleByMapSize(20, 70))
+	randInt(0, scaleByMapSize(4, 8))*randInt(1, scaleByMapSize(4, 9))
 );
 
-var multiplier = sqrt(randFloat(0.5,1.3)*randFloat(0.5,1.3));
+var multiplier = sqrt(randFloat(0.5,1.2)*randFloat(0.5,1.2));
 // calculate desired number of trees for map (based on size)
 if (rt == 6)
 {
@@ -1914,7 +1971,7 @@ createObjectGroups(group, 0,
 	planetm * scaleByMapSize(13, 200), 50
 );
 
-rt = randInt(1,3)
+rt = randInt(1,6)
 if (rt==1){
 setSkySet("cirrus");
 }
@@ -1923,6 +1980,15 @@ setSkySet("cumulus");
 }
 else if (rt ==3){
 setSkySet("sunny");
+}
+else if (rt ==4){
+setSkySet("sunny 1");
+}
+else if (rt ==5){
+setSkySet("mountainous");
+}
+else if (rt ==6){
+setSkySet("stratus");
 }
 setSunRotation(randFloat(0, TWO_PI));
 setSunElevation(randFloat(PI/ 5, PI / 3));
