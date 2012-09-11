@@ -142,6 +142,7 @@ struct SerializeEntityData
 };
 
 
+
 /**
  * Functor for sorting entities by distance from a source point.
  * It must only be passed entities that are in 'entities'
@@ -267,10 +268,16 @@ public:
 		m_TerrainVerticesPerSide = 0;
 
 		m_TerritoriesDirtyID = 0;
+
+        // pre-compute vision rays
+        LosBlockingInitializeRays();
 	}
 
 	virtual void Deinit()
 	{
+        // free blocking LOS ray schemes
+        for (size_t i = 0; i < m_LosSchemes.size(); ++i)
+            delete [] m_LosSchemes[i];
 	}
 
 	template<typename S>
@@ -1407,6 +1414,41 @@ public:
 	
 	
 	// blocking vision implementation
+    
+    // max range of rays that have been precalculated
+    static const size_t LOS_PRECALC_RANGE = sizeof(uint32_t) * 8;
+
+    // Holds Ray positions for the blocking LOS algorithm.
+    struct LosRayStop
+    {
+        // stop tile coordinates
+        int16 x, z;
+        // constructors
+        LosRayStop(int16 x_, int16 z_) : x(x_), z(z_) {}
+        LosRayStop() : x(0), z(0) {}
+    };
+
+    // Holds ray subset selection for given LOS range
+    struct LosScheme
+    {
+        size_t ray_idx;      // ray to be used
+        uint32 nearest_mask; // mask holding nearest samples
+        LosScheme(size_t idx, uint32 mask) : ray_idx(idx), nearest_mask(mask) {}
+        LosScheme() : ray_idx(0), nearest_mask(0) {}
+    };
+
+    // Holds a single ray stops
+    struct LosRay
+    {
+        LosRayStop ray[LOS_PRECALC_RANGE];
+        LosRay(const LosRay& r) { std::copy(r.ray, r.ray + LOS_PRECALC_RANGE, ray); }
+        LosRay() { }
+    };
+
+    // mapping of a LOS range to the vision selector
+    std::vector<LosScheme*> m_LosSchemes;
+    // pre-calculated rays
+    std::vector<LosRay> m_LosRays;
 	
 	/**
 	 * Angular iterator represented by an unit vector.
@@ -1420,10 +1462,10 @@ public:
 	public:
 		
 		/// Create a new angle iterator that divides angle max (default = 2*pi rad) into n angular steps
-		DirectionIterator(int n, fixed max = fixed::FromFloat(atan(1) * 8))
+		DirectionIterator(size_t n, fixed max = fixed::FromFloat(atan(1) * 8))
 			: m_step(0), m_cur(fixed::FromInt(1), fixed::FromInt(0))
 		{
-			sincos_approx(max / n, m_sin, m_cos);
+			sincos_approx(max / static_cast<int>(n), m_sin, m_cos);
 		}
 		
 		/// next direction step
@@ -1439,12 +1481,12 @@ public:
 		/// get the direction vector
 		CFixedVector2D operator*() const { return m_cur; }
 		/// get current step number
-		int step() const { return m_step; }
+		size_t step() const { return m_step; }
 		/// get cosine of the step angle
 		fixed step_cosine() const { return m_cos; }
 
 	private:
-		int m_step;           // current step number
+		size_t m_step;        // current step number
 		fixed m_sin, m_cos;   // approximate angle sine / cosine
 		CFixedVector2D m_cur; // current direction vector
 	};
@@ -1475,9 +1517,9 @@ public:
 		fixed distance() const { return m_dist; }
 		
 		/// Get current point as tile coordiantes (rounded)
-		std::pair<i16, i16> coords() const
+		LosRayStop coords() const
 		{
-			return std::make_pair(m_cur.X.ToInt_RoundToNearest(), m_cur.Y.ToInt_RoundToNearest());
+			return LosRayStop(m_cur.X.ToInt_RoundToNearest(), m_cur.Y.ToInt_RoundToNearest());
 		}
 		
 		/**
@@ -1488,8 +1530,8 @@ public:
 		 */
 		bool is_nearest_sample(fixed cos_alpha_1_2) const
 		{
-			std::pair<i16, i16> coords1 = coords();
-			CFixedVector2D actualvec(fixed::FromInt(coords1.first), fixed::FromInt(coords1.second));
+			LosRayStop coords1 = coords();
+			CFixedVector2D actualvec(fixed::FromInt(coords1.x), fixed::FromInt(coords1.z));
 			
 			// calculate angular error
 			fixed projected     = actualvec.Dot(m_step);
@@ -1511,20 +1553,187 @@ public:
 		fixed m_dist;                  // current ray position distance from the origin
 	};
 	
+    // compute ray count given LOS radius: r*pi*2/8, pi/4 approximated as 4/5
+    size_t LosRayCount(size_t r) { return (r * 4 + 2) / 5; }
+
+    /**
+     * Ray pre-calculation
+     */
+    void LosBlockingInitializeRays()
+    {
+        // temporary ray
+        LosRay ray;
+        size_t prevRayCount = 0;
+
+        // x-axis ray
+        for (size_t i = 0; i < LOS_PRECALC_RANGE; ++i)
+            ray.ray[i] = LosRayStop(i + 1, 0);
+        m_LosRays.push_back(ray);
+
+        // dummy entry for easier 1-based indexing
+        m_LosSchemes.push_back(0);
+
+        // for each LOS radius to be pre-computed
+        for (size_t r = 1; r <= LOS_PRECALC_RANGE; ++r)
+        {
+            size_t rayCount = LosRayCount(r);
+            
+            if (rayCount == prevRayCount && false)
+            {
+                // the previous scheme was the same as the current one, just copy it
+                m_LosSchemes.push_back(m_LosSchemes.back());
+                continue;
+            }
+
+            // we compute only one octant, in the whole circle, there are 8 times as many rays
+            DirectionIterator dir(rayCount * 8);
+            // x-axis ray already computed, skip
+            ++dir;
+
+            // create ray scheme and insert x-axis ray
+            LosScheme* scheme = new LosScheme[rayCount + 1];
+            m_LosSchemes.push_back(scheme);
+            scheme[0] = LosScheme(0, ~((uint32)0));
+
+            // (cos(alpha) + 1) / 2
+		    fixed cos_alpha_1_2 = (dir.step_cosine() + fixed::FromInt(1)).Multiply(fixed::FromFloat(0.49));
+
+            // for each ray direction in the first octant
+            for (; dir.step() <= rayCount; ++dir)
+            {
+                // for each ray stop
+                RayPointIterator pt(*dir);
+                uint32 mask = 0;
+
+                for (size_t pti = 0; pti < LOS_PRECALC_RANGE; ++pti, ++pt)
+                {
+                    ray.ray[pti] = pt.coords();
+                    mask |= (pt.is_nearest_sample(cos_alpha_1_2) ? 1 : 0) << (pti - 1);
+                }
+
+                // insert a new ray and a scheme entry
+                scheme[dir.step()] = LosScheme(m_LosRays.size(), mask);
+                m_LosRays.push_back(ray);
+            }
+        }
+    }
+
+
+    template <bool adding, size_t start, void(*swap_or_id)(int&,int&), int(*fx)(int), int(*fz)(int)>
+    inline void LosBlockingOctantHelper(u8 owner, size_t rayCount, LosScheme *scheme,
+                        size_t r, int x, int z, u16 alt, const u16* heightmap, u16* countsData)
+    {
+		// for each ray
+		for (size_t ri = start; ri <= rayCount; ++ri)
+		{
+			// height difference vs distance ratio
+			float min_xy = -1e10;
+
+            // get ray
+            LosRay& ray = m_LosRays[scheme[ri].ray_idx];
+            // get mask
+            uint32 mask = scheme[ri].nearest_mask;
+			
+			// for each stop on the ray
+			for (size_t si = 0; si < r; ++si)
+			{
+				// absolute ray position
+                int xr = fx(ray.ray[si].x), zr = fz(ray.ray[si].z);
+                swap_or_id(xr, zr);
+				int xx = x + xr, zz = z + zr;
+				
+				// map bounds check
+				if (xx < 1 || m_TerrainVerticesPerSide - 2 < xx ||
+					zz < 1 || m_TerrainVerticesPerSide - 2 < zz)
+					break;
+				
+				// compute the new angle
+				// BUG: sample water height instead of terrain height on water
+				float cur_xy = (heightmap[zz * m_TerrainVerticesPerSide + xx] - alt) / (si + 1.0);
+				
+				// visibility check
+				if (cur_xy >= min_xy)
+				{
+					// if this ray affects the tile, make it (not-)visible
+					if (mask & (1 << si))
+					{
+						if (adding)
+							LosAddStripHelper(owner, xx, xx, zz, countsData);
+						else
+							LosRemoveStripHelper(owner, xx, xx, zz, countsData);
+					}
+					
+					// update min viewing angle
+					min_xy = cur_xy;
+				}
+			}
+		}
+    }
+
+    static inline int nochange(int x) { return  x; }
+    static inline int negate(int x)   { return -x; }
+    static inline void nochange2(int&, int&) {}
 
 	/**
 	 * Add (adding=true) or remove (adding=false) vision within given range
-	 * takeing obstacles to vision into an account (currently terrain only).
+	 * taking obstacles to vision into an account (currently terrain only).
+     * pre-computed version of the algorithm.
 	 */
 	template<bool adding>
-	void LosBlockingUpdateHelper(u8 owner, entity_pos_t visionRange, CFixedVector2D pos)
+	void LosBlockingUpdateHelperPrecomputed(u8 owner, entity_pos_t visionRange, CFixedVector2D pos)
 	{
-		if (m_TerrainVerticesPerSide == 0) // do nothing if not initialised yet
-			return;
+		std::vector<u16>& counts = m_LosPlayerCounts.at(owner);
 
-		PROFILE("LosBlockingUpdateHelper");
-		TIMER(L"LosBlockingUpdateHelper");
+		// Lazy initialisation of counts:
+		if (counts.empty())
+			counts.resize(m_TerrainVerticesPerSide*m_TerrainVerticesPerSide);
 
+		u16* countsData = &counts[0];
+		
+		// Translate world coordinates into fractional tile-space coordinates
+		int x = (pos.X / (int)TERRAIN_TILE_SIZE).ToInt_RoundToNearest();
+		int z = (pos.Y / (int)TERRAIN_TILE_SIZE).ToInt_RoundToNearest();
+		size_t r = (visionRange / (int)TERRAIN_TILE_SIZE).ToInt_RoundToNearest();
+		// get height map
+		const u16* heightmap = GetSimContext().GetTerrain().GetHeightMap();
+		// unit height, hardcoded to 3m for now (TODO make configurable on per-unit-type basis)
+		const ssize_t unit_height = HEIGHT_UNITS_PER_METRE * 3;
+		// altitiude of unit viewpoint (BUG: does not work with naval units)
+		const float alt = unit_height + heightmap[z * m_TerrainVerticesPerSide + x];
+
+        assert(r <= LOS_PRECALC_RANGE);
+		
+		size_t rayCount = LosRayCount(r);
+        LosScheme *scheme = m_LosSchemes[r];
+		
+        if (r > 0)
+        {
+            // compute all octants
+            LosBlockingOctantHelper<adding, 0, nochange2, nochange, nochange>(owner, rayCount, scheme, r, x, z, alt, heightmap, countsData);
+            LosBlockingOctantHelper<adding, 0, std::swap, nochange, nochange>(owner, rayCount, scheme, r, x, z, alt, heightmap, countsData);
+            LosBlockingOctantHelper<adding, 0, nochange2, nochange,   negate>(owner, rayCount, scheme, r, x, z, alt, heightmap, countsData);
+            LosBlockingOctantHelper<adding, 0, std::swap, nochange,   negate>(owner, rayCount, scheme, r, x, z, alt, heightmap, countsData);
+            LosBlockingOctantHelper<adding, 0, nochange2,   negate, nochange>(owner, rayCount, scheme, r, x, z, alt, heightmap, countsData);
+            LosBlockingOctantHelper<adding, 0, std::swap,   negate, nochange>(owner, rayCount, scheme, r, x, z, alt, heightmap, countsData);
+            LosBlockingOctantHelper<adding, 0, nochange2,   negate,   negate>(owner, rayCount, scheme, r, x, z, alt, heightmap, countsData);
+            LosBlockingOctantHelper<adding, 0, std::swap,   negate,   negate>(owner, rayCount, scheme, r, x, z, alt, heightmap, countsData);
+        }
+		
+		// make the tile with the unit itself (not-)visible
+		if (adding)
+			LosAddStripHelper(owner, x, x, z, countsData);
+		else
+			LosRemoveStripHelper(owner, x, x, z, countsData);
+	}
+
+	/**
+	 * Add (adding=true) or remove (adding=false) vision within given range
+	 * taking obstacles to vision into an account (currently terrain only).
+     * Dynamic version of the algorithm.
+	 */
+	template<bool adding>
+	void LosBlockingUpdateHelperDynamic(u8 owner, entity_pos_t visionRange, CFixedVector2D pos)
+	{
 		std::vector<u16>& counts = m_LosPlayerCounts.at(owner);
 
 		// Lazy initialisation of counts:
@@ -1544,7 +1753,7 @@ public:
 		// altitiude of unit viewpoint (BUG: does not work with naval units)
 		const float alt = unit_height + heightmap[z * m_TerrainVerticesPerSide + x];
 		
-		int rayCount = r.ToInt_RoundToNearest() * 63 / 10;  // 2*pi ==approx 63/10
+		size_t rayCount = r.ToInt_RoundToNearest() * 63 / 10;  // 2*pi ==approx 63/10
 		DirectionIterator dir(rayCount);
 		// BEWARE: ugly hack below!! 0.9994 shall be 1, but precision issues will come up if changed to be so
 		fixed cos_alpha_1_2 = (dir.step_cosine() + fixed::FromInt(1)).Multiply(fixed::FromFloat(0.9994 / 2));
@@ -1558,10 +1767,10 @@ public:
 			// for each stop on the ray
 			for (RayPointIterator pos(*dir); pos.distance() <= r; ++pos)
 			{
-				std::pair<i16, i16> coords = pos.coords();
+				LosRayStop coords = pos.coords();
 				
 				// absolute ray position
-				int xx = coords.first + x, zz = coords.second + z;
+				int xx = coords.x + x, zz = coords.z + z;
 				
 				// map bounds check
 				if (xx < 1 || m_TerrainVerticesPerSide - 2 < xx ||
@@ -1597,6 +1806,18 @@ public:
 			LosAddStripHelper(owner, x, x, z, countsData);
 		else
 			LosRemoveStripHelper(owner, x, x, z, countsData);
+	}
+
+	template<bool adding>
+	void LosBlockingUpdateHelper(u8 owner, entity_pos_t visionRange, CFixedVector2D pos)
+	{
+		if (m_TerrainVerticesPerSide == 0 || m_LosSchemes.empty()) // do nothing if not initialised yet
+			return;
+
+		PROFILE("LosBlockingUpdateHelper");
+		TIMER(L"LosBlockingUpdateHelper");
+
+        LosBlockingUpdateHelperPrecomputed<adding>(owner, visionRange, pos);
 	}
 
 	void LosBlockingAdd(player_id_t owner, entity_pos_t visionRange, CFixedVector2D pos)
